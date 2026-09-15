@@ -15,7 +15,8 @@ struct ChoreSplitApp: App {
             Chore.self,
             ChoreValueVote.self,
             Assignment.self,
-            QualityRating.self
+            QualityRating.self,
+            PendingOperation.self
         ])
         do {
             return try ModelContainer(for: schema, configurations: ModelConfiguration(schema: schema))
@@ -30,7 +31,7 @@ struct ChoreSplitApp: App {
         WindowGroup {
             RootView()
                 .environment(appState)
-                .tint(Theme.indigo)
+                .tint(Theme.brand)
                 .onAppear { notificationDelegate.appState = appState }
         }
         .modelContainer(container)
@@ -69,13 +70,10 @@ final class NotificationDelegate: NSObject, UIApplicationDelegate, UNUserNotific
         didReceive response: UNNotificationResponse
     ) async {
         let info = response.notification.request.content.userInfo
+        // A rating nudge needs nothing extra: the home screen's "Give ratings" section is
+        // already where it lands.
         if let raw = info["assignmentID"] as? String, let id = UUID(uuidString: raw) {
-            await MainActor.run {
-                appState?.selectedTab = .today
-                appState?.pendingAssignmentID = id
-            }
-        } else if response.notification.request.identifier.hasPrefix("rate-") {
-            await MainActor.run { appState?.selectedTab = .rate }
+            await MainActor.run { appState?.pendingAssignmentID = id }
         }
     }
 }

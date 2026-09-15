@@ -42,12 +42,7 @@ struct PointsBadge: View {
         }
     }
 
-    private var text: String {
-        let rounded = (points * 10).rounded() / 10
-        return rounded == rounded.rounded()
-            ? String(Int(rounded))
-            : String(format: "%.1f", rounded)
-    }
+    private var text: String { PointsEngine.format(points) }
 
     var body: some View {
         HStack(spacing: 3) {
@@ -68,6 +63,65 @@ struct PointsBadge: View {
                 .opacity(provisional ? 1 : 0)
         )
         .accessibilityLabel("\(text) points\(provisional ? ", not final yet" : "")")
+    }
+}
+
+// MARK: - Points scale
+
+/// Four pips, filled up to a chore's points — so "3" always reads as "3 out of 4".
+struct PointsScale: View {
+    let points: Int
+    var tint: Color = Theme.indigo
+    var pipSize: CGFloat = 10
+
+    var body: some View {
+        HStack(spacing: pipSize * 0.45) {
+            ForEach(PointsEngine.pointRange, id: \.self) { step in
+                Capsule()
+                    .fill(step <= points ? tint : tint.opacity(0.15))
+                    .frame(width: pipSize * 2.2, height: pipSize)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(points) out of \(PointsEngine.maximumPoints) points")
+    }
+}
+
+// MARK: - Time input
+
+/// Minutes in 5-minute steps, shared by every screen that asks how long a job takes.
+struct MinutesSlider: View {
+    var title: String = "Time"
+    @Binding var minutes: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label(title, systemImage: "clock")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(minutes) min")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(Theme.amber)
+                    .monospacedDigit()
+            }
+            Slider(
+                value: Binding(
+                    get: { Double(minutes) },
+                    set: { minutes = Int(($0 / 5).rounded() * 5) }
+                ),
+                in: 5...120,
+                step: 5
+            )
+            .tint(Theme.amber)
+            HStack {
+                Text("5 min")
+                Spacer()
+                Text("2 hours")
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -139,33 +193,6 @@ struct ScaleSlider: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
-    }
-}
-
-// MARK: - Balance bar
-
-/// Load against fair share. The marker is the target, so "past the line" reads instantly.
-struct BalanceBar: View {
-    let percentOfTarget: Double
-    var height: CGFloat = 8
-
-    var body: some View {
-        GeometryReader { geo in
-            let capped = min(1.4, max(0, percentOfTarget))
-            let targetX = geo.size.width / 1.4
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color(.tertiarySystemFill))
-                Capsule()
-                    .fill(Theme.balanceColor(percentOfTarget: percentOfTarget).gradient)
-                    .frame(width: max(height, geo.size.width * (capped / 1.4)))
-                Rectangle()
-                    .fill(Color.primary.opacity(0.35))
-                    .frame(width: 1.5)
-                    .offset(x: targetX)
-            }
-        }
-        .frame(height: height)
-        .accessibilityLabel("\(Int(percentOfTarget * 100)) percent of fair share")
     }
 }
 

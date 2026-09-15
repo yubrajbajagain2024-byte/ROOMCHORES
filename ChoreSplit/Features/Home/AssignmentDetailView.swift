@@ -15,6 +15,7 @@ struct AssignmentDetailView: View {
     @State private var spokenText = ""
     @State private var isEditingPhrase = false
     @State private var notificationsDenied = false
+    @State private var showingFinish = false
 
     private var me: Roommate? { appState.activeRoommate(in: household) }
     private var isMine: Bool { assignment.assignee?.id == me?.id }
@@ -51,6 +52,9 @@ struct AssignmentDetailView: View {
                 }
             }
             .onAppear(perform: load)
+            .sheet(isPresented: $showingFinish) {
+                CompleteTaskSheet(assignment: assignment, household: household) { dismiss() }
+            }
             .onDisappear { VoiceReminderService.shared.stopSpeaking() }
             .alert("Notifications are off", isPresented: $notificationsDenied) {
                 Button("Open Settings") {
@@ -205,27 +209,8 @@ struct AssignmentDetailView: View {
     private func valueSection(chore: Chore) -> some View {
         Section {
             PointsPreview(values: chore.agreedValues, points: chore.points)
-
-            if chore.valuesAreRevealed(in: household) {
-                LabeledContent("Rated by") {
-                    Text("\(chore.votes.count) housemate\(chore.votes.count == 1 ? "" : "s")")
-                }
-                if chore.pointDrift != 0 {
-                    LabeledContent("Moved by ratings") {
-                        Text(chore.pointDrift > 0 ? "+\(chore.pointDrift) pts" : "\(chore.pointDrift) pts")
-                            .foregroundStyle(chore.pointDrift > 0 ? Theme.green : Theme.rose)
-                    }
-                }
-            } else {
-                Label(
-                    "Needs \(household.minimumRatingsToReveal) ratings before the household's numbers are shown.",
-                    systemImage: "eye.slash"
-                )
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            }
         } header: {
-            Text("What this chore is worth")
+            Text("What this task is worth")
         }
     }
 
@@ -233,7 +218,7 @@ struct AssignmentDetailView: View {
 
     private var ratingProgressSection: some View {
         let raters = assignment.eligibleRaters(in: household)
-        let rated = assignment.ratings.count
+        let rated = assignment.ratingCount
 
         return Section {
             HStack {
@@ -251,7 +236,7 @@ struct AssignmentDetailView: View {
                 }
             }
 
-            if assignment.qualityIsRevealed(in: household), let average = assignment.averageQuality {
+            if let average = assignment.revealedAverage(in: household) {
                 LabeledContent("How it went") {
                     Text(PointsEngine.describeQuality(average))
                         .foregroundStyle(Theme.qualityColor(average))
@@ -273,26 +258,26 @@ struct AssignmentDetailView: View {
     private var settledSection: some View {
         Section {
             LabeledContent("Points banked") {
-                Text(String(format: "%.1f", assignment.awardedPoints ?? Double(assignment.pointsQuoted)))
+                Text(PointsEngine.format(assignment.awardedPoints ?? Double(assignment.pointsQuoted)))
                     .fontWeight(.semibold)
             }
-            LabeledContent("Face value") {
-                Text("\(assignment.pointsQuoted) pts").foregroundStyle(.secondary)
+            LabeledContent("Chore worth") {
+                Text("\(assignment.pointsQuoted) of \(PointsEngine.maximumPoints) pts").foregroundStyle(.secondary)
             }
 
-            if assignment.qualityIsRevealed(in: household), let average = assignment.averageQuality {
+            if let average = assignment.revealedAverage(in: household) {
                 LabeledContent("Peer verdict") {
                     Text("\(PointsEngine.describeQuality(average)) · \(String(format: "%.1f", average))/5")
                         .foregroundStyle(Theme.qualityColor(average))
                 }
                 anonymousNotes
-            } else if assignment.ratings.isEmpty {
-                Label("Nobody rated this, so it paid face value.", systemImage: "equal.circle")
+            } else if assignment.ratingCount == 0 {
+                Label("Nobody rated this, so it paid full points.", systemImage: "equal.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } else {
                 Label(
-                    "Only \(assignment.ratings.count) rating came in — too few to show without giving away who wrote it.",
+                    "Only \(assignment.ratingCount) rating came in — too few to show without giving away who wrote it.",
                     systemImage: "lock"
                 )
                 .font(.caption)
@@ -305,14 +290,13 @@ struct AssignmentDetailView: View {
 
     @ViewBuilder
     private var anonymousNotes: some View {
-        let notes = assignment.ratings.map(\.note).filter { !$0.isEmpty }
+        let notes = assignment.revealedNotes(in: household)
         if !notes.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Anonymous notes")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                // Shuffled so note order does not match rating order and hint at who wrote what.
-                ForEach(Array(notes.shuffled().enumerated()), id: \.offset) { _, note in
+                ForEach(Array(notes.enumerated()), id: \.offset) { _, note in
                     Text("\u{201C}\(note)\u{201D}")
                         .font(.subheadline)
                         .italic()
@@ -333,11 +317,9 @@ struct AssignmentDetailView: View {
     private var actionSection: some View {
         Section {
             Button {
-                HouseholdActions.markComplete(assignment, in: household, context: context)
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-                dismiss()
+                showingFinish = true
             } label: {
-                Label("Mark as done", systemImage: "checkmark.circle.fill")
+                Label("Finish with a video", systemImage: "video.badge.checkmark")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -371,21 +353,19 @@ struct AssignmentDetailView: View {
         assignment.reminderDate = reminderOn ? reminderDate : nil
         try? context.save()
 
-        let name = assignment.assignee?.name ?? ""
-        let target = assignment
+        let reminder = NotificationService.ReminderRequest(
+            assignment: assignment,
+            assigneeName: assignment.assignee?.name ?? ""
+        )
+        let isOn = reminderOn
         Task {
-            if reminderOn {
-                let status = await NotificationService.shared.authorizationStatus()
-                if status == .denied {
+            if isOn {
+                let outcome = await NotificationService.shared.scheduleReminderRequestingPermission(reminder)
+                if outcome == .permissionDenied {
                     await MainActor.run { notificationsDenied = true }
-                    return
                 }
-                if status == .notDetermined {
-                    _ = await NotificationService.shared.requestAuthorization()
-                }
-                await NotificationService.shared.scheduleReminder(for: target, assigneeName: name)
             } else {
-                await NotificationService.shared.cancelReminder(for: target)
+                await NotificationService.shared.cancelReminder(assignmentID: reminder.assignmentID)
             }
         }
     }

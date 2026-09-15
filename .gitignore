@@ -30,3 +30,8 @@ fastlane/screenshots/**/*.png
 
 # Test output
 *.xcresult
+
+# Supabase — your project's keys stay on your machine (see Config/Supabase.example.plist)
+ChoreSplit/Supabase.plist
+supabase/tests/node_modules/
+supabase/.temp/

@@ -16,7 +16,7 @@ struct TestHousehold {
     init(memberCount: Int = 3, choreSpecs: [(String, Int, Int, Int)] = []) throws {
         let schema = Schema([
             Household.self, Roommate.self, Chore.self,
-            ChoreValueVote.self, Assignment.self, QualityRating.self
+            ChoreValueVote.self, Assignment.self, QualityRating.self, PendingOperation.self
         ])
         container = try ModelContainer(
             for: schema,
@@ -222,6 +222,6 @@ struct FairnessEngineTests {
         // And the one who did everything starts with credit.
         #expect(flat.members[0].carryOverPoints < 0)
         // Carry-over is capped so a bad cycle is recoverable.
-        #expect(abs(flat.members[2].carryOverPoints) <= 30)
+        #expect(abs(flat.members[2].carryOverPoints) <= FairnessEngine.maximumCarryOver)
     }
 }

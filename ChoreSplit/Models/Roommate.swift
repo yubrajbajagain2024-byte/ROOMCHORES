@@ -21,9 +21,14 @@ final class Roommate {
     /// simply forgiven every Monday.
     var carryOverPoints: Double = 0
 
+    /// "owner" or "member". The owner starts the group and can change its invite code.
+    var role: String = "member"
+
     var household: Household?
 
-    @Relationship(deleteRule: .cascade, inverse: \Assignment.assignee)
+    // Nullify rather than cascade: when someone leaves a shared group, the tasks they finished
+    // stay in everyone's history.
+    @Relationship(deleteRule: .nullify, inverse: \Assignment.assignee)
     var assignments: [Assignment]? = []
 
     init(name: String, emoji: String = "🙂", paletteIndex: Int = 0, shareWeight: Double = 1.0) {
@@ -38,6 +43,8 @@ final class Roommate {
 
     var color: Color { Theme.memberColor(paletteIndex) }
 
+    var isOwner: Bool { role == "owner" }
+
     /// First name plus last initial is enough to tell two roommates apart in a tight row.
     var shortName: String {
         let parts = name.split(separator: " ")
@@ -47,11 +54,4 @@ final class Roommate {
         }
         return String(first)
     }
-
-    var initials: String {
-        let parts = name.split(separator: " ").prefix(2)
-        let letters = parts.compactMap { $0.first }
-        return letters.isEmpty ? "?" : String(letters).uppercased()
-    }
-
 }

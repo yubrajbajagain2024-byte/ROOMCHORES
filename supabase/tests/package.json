@@ -1,0 +1,12 @@
+{
+  "name": "choresplit-database-tests",
+  "private": true,
+  "description": "Runs the Supabase migration in an embedded Postgres and checks the security rules.",
+  "type": "module",
+  "scripts": {
+    "test": "node policies.test.mjs ../migrations/20260914000000_choresplit.sql"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
+}

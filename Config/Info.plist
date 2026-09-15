@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged with the keys Xcode generates from build settings. Only things build settings
+	     can't express live here. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.choresplit.ChoreSplit</string>
+			<!-- choresplit://login-callback finishes Google sign-in;
+			     choresplit://join?code=… opens an invite. -->
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>choresplit</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

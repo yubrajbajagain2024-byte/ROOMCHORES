@@ -29,6 +29,15 @@ final class Chore {
     /// by glancing at the database. See `AnonymityService`.
     var anonymitySalt: Data = Data()
 
+    // MARK: - Server totals (shared groups)
+    //
+    // In a shared group the phone only ever holds your own vote. Everyone else's arrive as
+    // these totals, so nobody's numbers can be read back off the device.
+    var remoteVoteCount: Int?
+    var remoteAverageDifficulty: Double?
+    var remoteAverageLabor: Double?
+    var remoteAverageMinutes: Double?
+
     var household: Household?
 
     @Relationship(deleteRule: .cascade, inverse: \ChoreValueVote.chore)
@@ -73,12 +82,29 @@ final class Chore {
 
     var votes: [ChoreValueVote] { valueVotes ?? [] }
 
+    /// How many people have rated what this chore is worth.
+    var voteCount: Int { remoteVoteCount ?? votes.count }
+
     // MARK: - Agreed values
 
     /// The household's shared read of this chore: the proposer's numbers averaged
     /// with every anonymous vote. One person cannot inflate their own chore, and a
     /// job everyone quietly agrees is grim drifts upward on its own.
     var agreedValues: ChoreValues {
+        if let count = remoteVoteCount {
+            // Proposer's numbers weighted as one voice alongside the server's averages.
+            let n = Double(count)
+            func blend(_ proposed: Int, _ average: Double?) -> Double {
+                guard count > 0, let average else { return Double(proposed) }
+                return (Double(proposed) + average * n) / (n + 1)
+            }
+            return ChoreValues(
+                difficulty: blend(proposedDifficulty, remoteAverageDifficulty),
+                labor: blend(proposedLabor, remoteAverageLabor),
+                minutes: blend(proposedMinutes, remoteAverageMinutes)
+            )
+        }
+
         var difficulties = [Double(proposedDifficulty)]
         var labors = [Double(proposedLabor)]
         var minutes = [Double(proposedMinutes)]
@@ -111,14 +137,6 @@ final class Chore {
     /// What it was worth before peers re-rated it.
     var proposedPoints: Int { PointsEngine.points(for: proposedValues) }
 
-    /// Point movement caused by peer ratings, e.g. +3 or -2.
-    var pointDrift: Int { points - proposedPoints }
-
-    /// Ratings stay hidden until enough are in that no single rater can be
-    /// identified by elimination.
-    func valuesAreRevealed(in household: Household?) -> Bool {
-        votes.count >= (household?.minimumRatingsToReveal ?? 2)
-    }
 
     /// Has this roommate already had their say on what the chore is worth?
     func hasVoted(_ roommate: Roommate) -> Bool {

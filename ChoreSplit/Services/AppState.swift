@@ -17,30 +17,25 @@ final class AppState {
         }
     }
 
-    /// Set when the app wants to pull the user to a particular tab, e.g. after tapping
-    /// a reminder notification.
-    var selectedTab: AppTab = .today
-
     /// Assignment to open on appear, from a tapped notification.
     var pendingAssignmentID: UUID?
+
+    /// An invite code from a tapped choresplit://join link, waiting until someone is signed in.
+    var pendingInviteCode: String?
+
+    /// The on-device demo household, with no account or server. Debug builds only.
+    var isDemoMode: Bool = {
+        #if DEBUG
+        return ProcessInfo.processInfo.arguments.contains("--demo")
+        #else
+        return false
+        #endif
+    }()
 
     init() {
         if let raw = UserDefaults.standard.string(forKey: Self.activeRoommateKey) {
             activeRoommateID = UUID(uuidString: raw)
         }
-        #if DEBUG
-        // `--tab chores` etc. opens straight onto a tab, for driving the app in a simulator.
-        let arguments = ProcessInfo.processInfo.arguments
-        if let index = arguments.firstIndex(of: "--tab"), index + 1 < arguments.count {
-            switch arguments[index + 1] {
-            case "chores":    selectedTab = .chores
-            case "rate":      selectedTab = .rate
-            case "standings": selectedTab = .standings
-            case "settings":  selectedTab = .settings
-            default:          selectedTab = .today
-            }
-        }
-        #endif
     }
 
     func activeRoommate(in household: Household?) -> Roommate? {
@@ -49,10 +44,7 @@ final class AppState {
            let match = household.sortedMembers.first(where: { $0.id == activeRoommateID }) {
             return match
         }
-        return household.sortedMembers.first
+        // In a shared group you are your account, never whoever happens to be listed first.
+        return household.isShared ? nil : household.sortedMembers.first
     }
-}
-
-enum AppTab: Hashable {
-    case today, chores, rate, standings, settings
 }

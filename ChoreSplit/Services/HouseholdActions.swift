@@ -5,7 +5,32 @@ import SwiftData
 ///
 /// These are the operations the rules actually live in: completing work, banking points
 /// once peers have rated, and handing extra chores to whoever has fallen behind.
+/// Receives every change that should reach the server. Set while a shared group is open;
+/// `nil` for the on-device demo household, where nothing leaves the phone.
+protocol HouseholdSyncing: AnyObject {
+    /// The signed-in person on this phone.
+    var currentUserID: UUID { get }
+    func choreChanged(_ chore: Chore)
+    func assignmentChanged(_ assignment: Assignment)
+    func valueVoteCast(on chore: Chore, difficulty: Int, labor: Int, minutes: Int)
+    func qualityRated(_ assignment: Assignment, score: Int, note: String)
+    func memberChanged(_ roommate: Roommate)
+    func householdChanged(_ household: Household)
+    func proofVideoExpired(path: String)
+}
+
 enum HouseholdActions {
+
+    /// Where changes go to be synced. Weak, so a closed group's engine isn't kept alive.
+    static weak var sync: HouseholdSyncing?
+
+    /// Whether this phone should remind someone about a task. In a shared group a reminder
+    /// belongs on the phone of the person doing it — theirs schedules it when the task arrives —
+    /// otherwise your phone would announce "Priya, the bins are due" out loud. On the demo's
+    /// shared phone, everyone's reminders go here.
+    static func remindsOnThisPhone(for roommate: Roommate, in household: Household) -> Bool {
+        !household.isShared || sync?.currentUserID == roommate.id
+    }
 
     // MARK: - Doing chores
 
@@ -15,10 +40,19 @@ enum HouseholdActions {
         assignment.completedAt = Date()
         assignment.status = .awaitingReview
 
-        Task { await NotificationService.shared.cancelReminder(for: assignment) }
+        let assignmentID = assignment.id
+        Task { await NotificationService.shared.cancelReminder(assignmentID: assignmentID) }
+
+        // A one-off task is finished for good. Leaving it active would let the catch-up
+        // planner hand the same errand out again next time someone falls behind.
+        if let chore = assignment.chore, chore.recurrence == .once {
+            chore.isActive = false
+            sync?.choreChanged(chore)
+        }
+        sync?.assignmentChanged(assignment)
 
         // In a one-person household — or when nobody else can rate — there is nothing to
-        // wait for, so settle at face value immediately.
+        // wait for, so settle at full points immediately.
         if assignment.eligibleRaters(in: household).isEmpty {
             settle(assignment)
         } else if let deadline = assignment.ratingDeadline(in: household) {
@@ -38,7 +72,9 @@ enum HouseholdActions {
     static func markSkipped(_ assignment: Assignment, context: ModelContext) {
         assignment.status = .skipped
         assignment.awardedPoints = 0
-        Task { await NotificationService.shared.cancelReminder(for: assignment) }
+        sync?.assignmentChanged(assignment)
+        let assignmentID = assignment.id
+        Task { await NotificationService.shared.cancelReminder(assignmentID: assignmentID) }
         try? context.save()
     }
 
@@ -49,6 +85,19 @@ enum HouseholdActions {
             averageQuality: assignment.averageQuality
         )
         assignment.status = .settled
+
+        // The video was there so roommates could judge the work. With ratings closed its job
+        // is done, and keeping a clip per chore would slowly fill a shared phone.
+        if let filename = assignment.proofVideoFilename {
+            ProofVideoStore.delete(filename: filename)
+            assignment.proofVideoFilename = nil
+            assignment.proofVideoDuration = nil
+        }
+        if let path = assignment.proofVideoRemotePath {
+            sync?.proofVideoExpired(path: path)
+            assignment.proofVideoRemotePath = nil
+            sync?.assignmentChanged(assignment)
+        }
     }
 
     // MARK: - Anonymous ratings
@@ -71,6 +120,7 @@ enum HouseholdActions {
         )
         rating.assignment = assignment
         context.insert(rating)
+        sync?.qualityRated(assignment, score: score, note: rating.note)
 
         // Once everyone entitled to rate has done so, there is nothing left to wait for.
         let raters = assignment.eligibleRaters(in: household)
@@ -99,6 +149,7 @@ enum HouseholdActions {
         )
         vote.chore = chore
         context.insert(vote)
+        sync?.valueVoteCast(on: chore, difficulty: difficulty, labor: labor, minutes: minutes)
         try? context.save()
     }
 
@@ -126,17 +177,18 @@ enum HouseholdActions {
         assignment.reminderSpokenText = ReminderPhrase.sentence(for: assignment, assigneeName: roommate.name)
         assignment.reminderDate = defaultReminderDate(for: due)
         context.insert(assignment)
+        sync?.assignmentChanged(assignment)
 
-        if scheduleReminder {
-            let name = roommate.name
-            Task { await NotificationService.shared.scheduleReminder(for: assignment, assigneeName: name) }
+        if scheduleReminder, remindsOnThisPhone(for: roommate, in: household) {
+            let reminder = NotificationService.ReminderRequest(assignment: assignment, assigneeName: roommate.name)
+            Task { await NotificationService.shared.scheduleReminder(reminder) }
         }
         try? context.save()
         return assignment
     }
 
     static func apply(_ proposals: [ProposedAssignment], in household: Household, context: ModelContext) {
-        var created: [(Assignment, String)] = []
+        var reminders: [NotificationService.ReminderRequest] = []
         for proposal in proposals {
             let assignment = assign(
                 chore: proposal.chore,
@@ -149,15 +201,17 @@ enum HouseholdActions {
                 // Reminders are scheduled below instead, one at a time.
                 scheduleReminder: false
             )
-            created.append((assignment, proposal.roommate.name))
+            if remindsOnThisPhone(for: proposal.roommate, in: household) {
+                reminders.append(NotificationService.ReminderRequest(assignment: assignment, assigneeName: proposal.roommate.name))
+            }
         }
 
         // A rebalance can hand out a dozen chores at once. Each voice reminder means
         // running the speech synthesiser, so they go through in sequence — firing a dozen
         // synthesisers concurrently is enough to take the app down.
         Task {
-            for (assignment, name) in created {
-                await NotificationService.shared.scheduleReminder(for: assignment, assigneeName: name)
+            for reminder in reminders {
+                await NotificationService.shared.scheduleReminder(reminder)
             }
         }
     }
@@ -202,15 +256,29 @@ enum HouseholdActions {
 
     // MARK: - Maintenance
 
+    /// A chore was created or edited in a view.
+    static func choreSaved(_ chore: Chore) {
+        sync?.choreChanged(chore)
+    }
+
+    /// Group-level settings changed, such as setup finishing.
+    static func householdSaved(_ household: Household) {
+        sync?.householdChanged(household)
+    }
+
     /// Housekeeping run on launch and whenever the app comes back to the foreground:
     /// close expired rating windows, roll the cycle, and top up anyone who has fallen behind.
-    static func runMaintenance(for household: Household, context: ModelContext) {
+    ///
+    /// In a shared group the server settles ratings, so `settlesLocally` is false there.
+    static func runMaintenance(for household: Household, context: ModelContext, settlesLocally: Bool = true) {
         let now = Date()
 
         // 1. Settle anything whose rating window has closed.
-        for assignment in (household.assignments ?? []) where assignment.status == .awaitingReview {
-            if let deadline = assignment.ratingDeadline(in: household), deadline <= now {
-                settle(assignment)
+        if settlesLocally {
+            for assignment in (household.assignments ?? []) where assignment.status == .awaitingReview {
+                if let deadline = assignment.ratingDeadline(in: household), deadline <= now {
+                    settle(assignment)
+                }
             }
         }
 
@@ -220,11 +288,14 @@ enum HouseholdActions {
         where assignment.status == .open && assignment.dueDate < staleCutoff {
             assignment.status = .skipped
             assignment.awardedPoints = 0
+            sync?.assignmentChanged(assignment)
         }
 
         // 3. Roll the cycle if we have passed its end, carrying half of any imbalance forward.
         if now >= household.cycleEndDate {
             FairnessEngine.rollCycle(for: household)
+            household.sortedMembers.forEach { sync?.memberChanged($0) }
+            sync?.householdChanged(household)
         }
 
         // 4. Hand catch-up chores to whoever is under their share.
@@ -234,6 +305,11 @@ enum HouseholdActions {
         }
 
         try? context.save()
+
+        let stillBeingRated = Set((household.assignments ?? [])
+            .filter { $0.status == .awaitingReview }
+            .compactMap(\.proofVideoFilename))
+        ProofVideoStore.prune(keeping: stillBeingRated)
 
         let liveIDs = Set((household.assignments ?? []).filter { $0.status == .open }.map(\.id))
         Task { await NotificationService.shared.pruneOrphans(activeAssignmentIDs: liveIDs) }

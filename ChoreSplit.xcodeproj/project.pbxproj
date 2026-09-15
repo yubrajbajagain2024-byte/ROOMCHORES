@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		CS00000000000000000000A2 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = CS00000000000000000000A1 /* Supabase */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		CS0000000000000000000010 /* ChoreSplit.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ChoreSplit.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CS0000000000000000000011 /* ChoreSplitTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChoreSplitTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -21,6 +25,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CS00000000000000000000A2 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +76,9 @@
 				CS0000000000000000000020 /* ChoreSplit */,
 			);
 			name = ChoreSplit;
+			packageProductDependencies = (
+				CS00000000000000000000A1 /* Supabase */,
+			);
 			productName = ChoreSplit;
 			productReference = CS0000000000000000000010 /* ChoreSplit.app */;
 			productType = "com.apple.product-type.application";
@@ -141,6 +149,9 @@
 			);
 			mainGroup = CS0000000000000000000040;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				CS00000000000000000000A0 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = CS0000000000000000000041 /* Products */;
 			projectDirPath = "";
@@ -178,6 +189,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		CS00000000000000000000A0 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.55.2;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		CS00000000000000000000A1 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = CS00000000000000000000A0 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin XCBuildConfiguration section */
 		CS0000000000000000000090 /* Debug */ = {
@@ -245,8 +275,10 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ChoreSplit;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ChoreSplit never records audio. This entry is only present because the app uses the speech framework to speak reminders out loud.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "ChoreSplit uses the camera to record a short video showing a task is done, so your roommates can see it before they rate it.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ChoreSplit records sound with the videos you take to show a task is done. It doesn't listen at any other time.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -274,8 +306,10 @@
 				DEVELOPMENT_ASSET_PATHS = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = ChoreSplit;
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ChoreSplit never records audio. This entry is only present because the app uses the speech framework to speak reminders out loud.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "ChoreSplit uses the camera to record a short video showing a task is done, so your roommates can see it before they rate it.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "ChoreSplit records sound with the videos you take to show a task is done. It doesn't listen at any other time.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

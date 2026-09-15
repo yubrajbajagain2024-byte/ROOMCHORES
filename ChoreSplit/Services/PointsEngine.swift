@@ -1,64 +1,81 @@
 import Foundation
 
-/// Turns "how hard is this job" into a number.
+/// Turns "how hard is this job" into a number from 1 to 4.
 ///
 /// Three inputs, because roommates argue about three different things: a chore can be
 /// quick but disgusting (scrubbing the toilet), long but easy (a laundry cycle), or
 /// physically heavy (hauling recycling down three flights). Scoring only on time would
 /// under-pay the first, only on effort would under-pay the second.
+///
+/// Each input is placed on the same 1–4 level as the points themselves, and the chore is
+/// worth the average of the three, rounded to a whole point. That keeps the rule simple
+/// enough to explain in one sentence at the kitchen table.
 enum PointsEngine {
 
-    // Weights. Tuned so a 5-minute bin run lands around 4 points and a 45-minute
-    // deep-clean lands around 22 — a spread wide enough to feel fair, narrow enough
-    // that no single chore dominates a week.
-    static let difficultyWeight = 1.4
-    static let laborWeight = 1.4
-    /// Per minute. 10 minutes of work is worth ~2.8 points on its own.
-    static let minuteWeight = 0.28
-    /// Pulls the floor down so trivial jobs do not all bunch up at the same value.
-    static let baseOffset = 1.5
+    static let minimumPoints = 1
+    static let maximumPoints = 4
+    static var pointRange: ClosedRange<Int> { minimumPoints...maximumPoints }
 
-    static func rawScore(for values: ChoreValues) -> Double {
-        (values.difficulty * difficultyWeight)
-            + (values.labor * laborWeight)
-            + (values.minutes * minuteWeight)
-            - baseOffset
+    // MARK: - Levels
+
+    /// Difficulty and effort are rated 1–5 — five steps gives raters room for "a bit worse
+    /// than average" — then stretched onto the 1–4 points scale.
+    static func level(forRating rating: Double) -> Double {
+        let clamped = min(5, max(1, rating))
+        return 1 + (clamped - 1) * 0.75
     }
 
-    static func points(for values: ChoreValues) -> Int {
-        max(1, Int(rawScore(for: values).rounded()))
-    }
-
-    /// Split of a chore's score by input, for the "why is this worth 13 points?" breakdown.
-    static func breakdown(for values: ChoreValues) -> [(label: String, points: Double)] {
-        [
-            ("Difficulty", values.difficulty * difficultyWeight),
-            ("Physical effort", values.labor * laborWeight),
-            ("Time", values.minutes * minuteWeight)
-        ]
-    }
-
-    // MARK: - Quality multiplier
-
-    /// How peer quality ratings scale the payout.
-    ///
-    /// A 3 ("done properly") pays exactly what the chore is worth. Sloppy work pays less,
-    /// but never zero — the job still got done. Excellent work pays a modest premium, kept
-    /// small on purpose so the incentive is to do chores, not to farm compliments.
-    static func qualityMultiplier(averageScore: Double) -> Double {
-        let score = min(5, max(1, averageScore))
-        if score <= 3 {
-            return 0.6 + (score - 1) * 0.2   // 1 → 0.60, 3 → 1.00
-        } else {
-            return 1.0 + (score - 3) * 0.1   // 3 → 1.00, 5 → 1.20
+    /// Time is banded rather than scaled, so "about 15 minutes" and "about 18 minutes"
+    /// don't produce different answers.
+    static func level(forMinutes minutes: Double) -> Double {
+        switch minutes {
+        case ...10: return 1
+        case ...20: return 2
+        case ...40: return 3
+        default:    return 4
         }
     }
 
-    /// Final points for a completed assignment. With no ratings in, the chore pays
-    /// face value — silence is not treated as criticism.
+    /// The three levels a chore is judged on, each from 1 to 4.
+    static func breakdown(for values: ChoreValues) -> [(label: String, level: Double)] {
+        [
+            ("Difficulty", level(forRating: values.difficulty)),
+            ("Physical effort", level(forRating: values.labor)),
+            ("Time", level(forMinutes: values.minutes))
+        ]
+    }
+
+    /// The unrounded average of the three levels, 1.0–4.0.
+    static func exactScore(for values: ChoreValues) -> Double {
+        let levels = breakdown(for: values).map(\.level)
+        return levels.reduce(0, +) / Double(levels.count)
+    }
+
+    static func points(for values: ChoreValues) -> Int {
+        let rounded = Int(exactScore(for: values).rounded())
+        return min(maximumPoints, max(minimumPoints, rounded))
+    }
+
+    // MARK: - Quality
+
+    /// How peer quality ratings scale the payout.
+    ///
+    /// Three stars or more ("done properly") pays the chore's full points. Below that the
+    /// payout drops, down to half for work that has to be redone — but never to zero, since
+    /// the job still got done. There is no bonus above full points: a 4-point chore pays at
+    /// most 4, so every payout stays on the same 1–4 scale as the chore itself.
+    static func qualityMultiplier(averageScore: Double) -> Double {
+        let score = min(5, max(1, averageScore))
+        guard score < 3 else { return 1.0 }
+        return 0.5 + (score - 1) * 0.25   // 1 → 0.50, 2 → 0.75, 3 → 1.00
+    }
+
+    /// Final points for a completed assignment, in half-point steps. With no ratings in,
+    /// the chore pays its full points — silence is not treated as criticism.
     static func settledPoints(quoted: Int, averageQuality: Double?) -> Double {
         guard let averageQuality else { return Double(quoted) }
-        return (Double(quoted) * qualityMultiplier(averageScore: averageQuality) * 10).rounded() / 10
+        let raw = Double(quoted) * qualityMultiplier(averageScore: averageQuality)
+        return max(0.5, (raw * 2).rounded() / 2)
     }
 
     static func describeQuality(_ score: Double) -> String {
@@ -69,5 +86,13 @@ enum PointsEngine {
         case ..<4.5:  return "Done well"
         default:      return "Spotless"
         }
+    }
+
+    // MARK: - Display
+
+    /// "3" for whole points, "2.5" for half points.
+    static func format(_ points: Double) -> String {
+        let halves = (points * 2).rounded() / 2
+        return halves == halves.rounded() ? String(Int(halves)) : String(format: "%.1f", halves)
     }
 }

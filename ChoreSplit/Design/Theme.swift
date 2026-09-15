@@ -14,6 +14,25 @@ enum Theme {
     static let rose   = Color(red: 0.84, green: 0.38, blue: 0.40)
     static let slate  = Color(red: 0.44, green: 0.47, blue: 0.54)
 
+    // MARK: - Feed
+
+    /// Action colour: links, the wordmark, primary buttons.
+    static let brand = adaptive(light: (0.031, 0.400, 1.000), dark: (0.176, 0.533, 1.000))
+    /// The grey behind the cards.
+    static let feedBackground = adaptive(light: (0.910, 0.918, 0.929), dark: (0.094, 0.098, 0.102))
+    static let feedCard = adaptive(light: (1.000, 1.000, 1.000), dark: (0.141, 0.145, 0.149))
+    /// Round icon buttons and input pills.
+    static let chipFill = adaptive(light: (0.894, 0.902, 0.922), dark: (0.227, 0.231, 0.235))
+    static let secondaryText = adaptive(light: (0.396, 0.404, 0.420), dark: (0.690, 0.702, 0.722))
+    static let hairline = adaptive(light: (0.808, 0.816, 0.831), dark: (0.243, 0.247, 0.251))
+
+    private static func adaptive(light: (Double, Double, Double), dark: (Double, Double, Double)) -> Color {
+        Color(UIColor { traits in
+            let rgb = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: rgb.0, green: rgb.1, blue: rgb.2, alpha: 1)
+        })
+    }
+
     /// Distinct colours for roommate avatars, ordered so the first few stay far apart.
     static let memberPalette: [Color] = [indigo, amber, teal, rose, violet, green, sky, slate]
 
@@ -22,16 +41,6 @@ enum Theme {
     }
 
     // MARK: - Semantics
-
-    /// Green when ahead, amber when drifting, red when properly behind.
-    static func balanceColor(percentOfTarget: Double) -> Color {
-        switch percentOfTarget {
-        case ..<0.75: return rose
-        case ..<0.92: return amber
-        case ..<1.15: return green
-        default:      return teal
-        }
-    }
 
     static func qualityColor(_ score: Double) -> Color {
         switch score {

@@ -106,6 +106,7 @@ struct StarterChorePickerView: View {
             )
             chore.household = household
             context.insert(chore)
+            HouseholdActions.choreSaved(chore)
         }
         try? context.save()
         dismiss()

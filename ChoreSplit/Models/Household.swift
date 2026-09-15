@@ -29,6 +29,14 @@ final class Household {
     /// Whether the app may hand out catch-up chores on its own.
     var autoAssignEnabled: Bool = true
 
+    // MARK: - Shared groups
+
+    /// True for a group that lives on the server and syncs between phones. The id matches the
+    /// server's group id. False for the on-device demo household.
+    var isShared: Bool = false
+    var inviteCode: String = ""
+    var lastSyncedAt: Date?
+
     @Relationship(deleteRule: .cascade, inverse: \Roommate.household)
     var members: [Roommate]? = []
 
@@ -74,11 +82,6 @@ final class Household {
         guard days >= cycleLengthDays, cycleLengthDays > 0 else { return cycleStartDate }
         let elapsed = (days / cycleLengthDays) * cycleLengthDays
         return calendar.date(byAdding: .day, value: elapsed, to: cycleStartDate) ?? cycleStartDate
-    }
-
-    var daysLeftInCycle: Int {
-        let days = Calendar.current.dateComponents([.day], from: Date(), to: cycleEndDate).day ?? 0
-        return max(0, days)
     }
 
     /// Assignments belonging to the cycle in progress.

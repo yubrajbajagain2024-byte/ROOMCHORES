@@ -31,8 +31,24 @@ final class Assignment {
     var voiceReminderEnabled: Bool = true
     /// The sentence that gets spoken. Generated from the chore, editable by the user.
     var reminderSpokenText: String = ""
-    /// Identifier of the scheduled notification, so it can be cancelled or replaced.
-    var notificationID: String?
+
+    // MARK: - Proof video
+
+    /// The video the assignee attached to show the task was done, stored by `ProofVideoStore`.
+    /// Cleared, and the file deleted, once ratings close.
+    var proofVideoFilename: String?
+    var proofVideoDuration: Double?
+
+    /// Where the proof video lives on the server, once uploaded.
+    var proofVideoRemotePath: String?
+
+    // MARK: - Server totals (shared groups)
+    //
+    // Only your own rating is ever on the phone. The count, and — once enough people have
+    // rated — the average and notes, come from the server.
+    var remoteRatingCount: Int?
+    var remoteAverageScore: Double?
+    var remoteNotes: [String]?
 
     /// Per-assignment salt for hashing quality-rater identities.
     var anonymitySalt: Data = Data()
@@ -64,12 +80,25 @@ final class Assignment {
         self.reminderSpokenText = ""
     }
 
+    /// An assignment arriving from the server. The sync layer fills in the rest.
+    init(remoteID: UUID) {
+        self.id = remoteID
+        self.anonymitySalt = AnonymityService.newSalt()
+        self.statusRaw = AssignmentStatus.open.rawValue
+        self.reminderSpokenText = ""
+    }
+
     var status: AssignmentStatus {
         get { AssignmentStatus(rawValue: statusRaw) ?? .open }
         set { statusRaw = newValue.rawValue }
     }
 
     var title: String { chore?.title ?? "Chore" }
+
+    /// The proof video on disk, if there is one and it still exists.
+    var proofVideoURL: URL? {
+        proofVideoFilename.flatMap(ProofVideoStore.existingURL(for:))
+    }
     var ratings: [QualityRating] { qualityRatings ?? [] }
 
     // MARK: - Points
@@ -89,15 +118,36 @@ final class Assignment {
         status == .open || status == .awaitingReview
     }
 
+    /// The true average of the ratings on this phone. Used to settle points in the demo
+    /// household; shared groups are settled by the server.
     var averageQuality: Double? {
         guard !ratings.isEmpty else { return nil }
         return ratings.map { Double($0.score) }.average
     }
 
+    /// How many people have rated this task so far.
+    var ratingCount: Int { remoteRatingCount ?? ratings.count }
+
     /// Quality scores stay hidden until enough raters are in.
     func qualityIsRevealed(in household: Household?) -> Bool {
-        ratings.count >= (household?.minimumRatingsToReveal ?? 2)
+        ratingCount >= (household?.minimumRatingsToReveal ?? 2)
     }
+
+    /// The average rating, or `nil` while too few are in to show it anonymously.
+    func revealedAverage(in household: Household?) -> Double? {
+        guard qualityIsRevealed(in: household) else { return nil }
+        return remoteRatingCount != nil ? remoteAverageScore : averageQuality
+    }
+
+    /// Anonymous notes, once enough ratings are in — sorted, so their order gives nothing away.
+    func revealedNotes(in household: Household?) -> [String] {
+        guard qualityIsRevealed(in: household) else { return [] }
+        let notes = remoteRatingCount != nil ? (remoteNotes ?? []) : ratings.map(\.note)
+        return notes.filter { !$0.isEmpty }.sorted()
+    }
+
+    /// The video to play: the file on this phone if there is one, otherwise the uploaded copy.
+    var hasProofVideo: Bool { proofVideoURL != nil || proofVideoRemotePath != nil }
 
     func hasRated(_ roommate: Roommate) -> Bool {
         let token = AnonymityService.token(for: roommate.id, salt: anonymitySalt)

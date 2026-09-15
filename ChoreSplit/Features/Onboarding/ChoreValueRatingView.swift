@@ -62,26 +62,7 @@ struct ChoreValueRatingView: View {
                     )
                     .padding(.vertical, 4)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Label("How long it really takes", systemImage: "clock")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text("\(minutes) min")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(Theme.amber)
-                                .monospacedDigit()
-                        }
-                        Slider(
-                            value: Binding(
-                                get: { Double(minutes) },
-                                set: { minutes = Int(($0 / 5).rounded() * 5) }
-                            ),
-                            in: 5...120,
-                            step: 5
-                        )
-                        .tint(Theme.amber)
-                    }
+                    MinutesSlider(title: "How long it really takes", minutes: $minutes)
                     .padding(.vertical, 4)
                 } header: {
                     Text("Your honest read")

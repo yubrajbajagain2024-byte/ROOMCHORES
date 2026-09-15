@@ -23,7 +23,7 @@ struct RatingFlowTests {
         #expect(assignment.pointsAreProvisional)
     }
 
-    @Test("Once everyone has rated, the points settle straight away")
+    @Test("Once everyone has rated, the points settle straight away — at no more than the chore is worth")
     func settlesWhenAllRatersAreIn() throws {
         let flat = try makeFlat()
         let assignment = flat.assign(flat.chores[0], to: flat.members[0])
@@ -37,7 +37,7 @@ struct RatingFlowTests {
 
         #expect(assignment.status == .settled)
         let awarded = try #require(assignment.awardedPoints)
-        #expect(awarded > Double(assignment.pointsQuoted))
+        #expect(awarded == Double(assignment.pointsQuoted))
     }
 
     @Test("Sloppy work pays less than the chore is worth")
@@ -115,8 +115,7 @@ struct RatingFlowTests {
         }
 
         #expect(chore.points > proposed)
-        #expect(chore.pointDrift > 0)
-        #expect(chore.valuesAreRevealed(in: flat.household))
+        #expect(chore.votes.count == 2)
     }
 
     @Test("One person can't inflate their own chore")
@@ -131,8 +130,9 @@ struct RatingFlowTests {
             )
         }
 
-        // The proposal is one voice among three, so the value drops most of the way back.
-        #expect(chore.points < inflated / 2)
+        // The proposal is one voice among three, so the value is pulled down.
+        #expect(inflated == PointsEngine.maximumPoints)
+        #expect(chore.points < inflated)
     }
 
     @Test("Voting twice on the same chore is ignored")
@@ -179,6 +179,46 @@ struct RatingFlowTests {
 
         let standing = try #require(flat.standing(for: flat.members[0]))
         #expect(standing.load == 0)
+    }
+
+    @Test("A finished one-off task comes off the chore list; a repeating chore stays")
+    func oneOffTasksRetire() throws {
+        let flat = try TestHousehold(choreSpecs: [("Buy light bulbs", 1, 1, 15), ("Wash up", 2, 2, 20)])
+        let oneOff = flat.chores[0]
+        oneOff.recurrence = .once
+        let repeating = flat.chores[1]
+
+        HouseholdActions.markComplete(flat.assign(oneOff, to: flat.members[0]), in: flat.household, context: flat.context)
+        HouseholdActions.markComplete(flat.assign(repeating, to: flat.members[1]), in: flat.household, context: flat.context)
+
+        #expect(!oneOff.isActive)
+        #expect(repeating.isActive)
+        // And the planner can no longer hand the errand out again.
+        #expect(!FairnessEngine.availableChores(in: flat.household).contains { $0.id == oneOff.id })
+    }
+
+    @Test("A reminder is scheduled from a copy of the task, not the task itself")
+    func reminderSnapshot() throws {
+        // Scheduling runs in a background task. Handing it the SwiftData object instead of a
+        // copy let that task write to the model off the main thread, which crashed the app.
+        let flat = try TestHousehold(choreSpecs: [("Take the bins out", 1, 3, 10)])
+        let task = flat.assign(flat.chores[0], to: flat.members[1])
+        task.reminderDate = Date().addingTimeInterval(3600)
+        task.reminderSpokenText = ""
+        task.voiceReminderEnabled = false
+
+        let reminder = NotificationService.ReminderRequest(assignment: task, assigneeName: "Priya Shah")
+
+        #expect(reminder.assignmentID == task.id)
+        #expect(reminder.title == "Take the bins out")
+        #expect(reminder.fireDate == task.reminderDate)
+        #expect(!reminder.voiceEnabled)
+        #expect(reminder.spokenText.hasPrefix("Priya, take the bins out"))
+        #expect(NotificationService.identifier(for: task.id) == "chore-\(task.id.uuidString)")
+
+        // Changing the task afterwards doesn't reach into a reminder already on its way.
+        task.reminderSpokenText = "Something else"
+        #expect(reminder.spokenText.hasPrefix("Priya,"))
     }
 
     @Test("A solo household settles immediately — there's nobody to rate you")

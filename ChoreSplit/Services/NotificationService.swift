@@ -26,16 +26,44 @@ final class NotificationService {
 
     // MARK: - Scheduling
 
-    /// Schedule (or reschedule) the reminder for an assignment.
+    /// Everything a reminder needs, copied out of the assignment up front.
     ///
-    /// When a voice reminder is on, the sentence is synthesised to an audio file first
-    /// and attached as the notification's sound, so the phone speaks the reminder aloud
-    /// instead of playing a default chime.
-    @discardableResult
-    func scheduleReminder(for assignment: Assignment, assigneeName: String) async -> Bool {
-        await cancelReminder(for: assignment)
+    /// Scheduling hops off the main thread to record the voice clip and talk to the
+    /// notification centre. SwiftData objects belong to the thread that owns their context, so
+    /// the work carries plain values rather than the assignment itself — touching the model
+    /// from a background task is a data race that can crash the app.
+    struct ReminderRequest: Sendable {
+        let assignmentID: UUID
+        let title: String
+        let spokenText: String
+        let fireDate: Date?
+        let voiceEnabled: Bool
 
-        guard let fireDate = assignment.reminderDate, fireDate > Date() else { return false }
+        init(assignment: Assignment, assigneeName: String) {
+            assignmentID = assignment.id
+            title = assignment.title
+            spokenText = assignment.reminderSpokenText.isEmpty
+                ? ReminderPhrase.sentence(for: assignment, assigneeName: assigneeName)
+                : assignment.reminderSpokenText
+            fireDate = assignment.reminderDate
+            voiceEnabled = assignment.voiceReminderEnabled
+        }
+    }
+
+    static func identifier(for assignmentID: UUID) -> String {
+        "chore-\(assignmentID.uuidString)"
+    }
+
+    /// Schedule (or reschedule) a reminder.
+    ///
+    /// When a voice reminder is on, the sentence is synthesised to an audio file first and
+    /// attached as the notification's sound, so the phone speaks the reminder aloud instead of
+    /// playing a default chime.
+    @discardableResult
+    func scheduleReminder(_ reminder: ReminderRequest) async -> Bool {
+        await cancelReminder(assignmentID: reminder.assignmentID)
+
+        guard let fireDate = reminder.fireDate, fireDate > Date() else { return false }
 
         // Synthesising a voice clip takes real time and real memory. There is no point
         // paying for it when the system will not deliver the notification anyway — callers
@@ -45,22 +73,17 @@ final class NotificationService {
             return false
         }
 
-        let identifier = "chore-\(assignment.id.uuidString)"
-        let spoken = assignment.reminderSpokenText.isEmpty
-            ? ReminderPhrase.sentence(for: assignment, assigneeName: assigneeName)
-            : assignment.reminderSpokenText
-
         let content = UNMutableNotificationContent()
-        content.title = assignment.title
-        content.body = spoken
-        content.userInfo = ["assignmentID": assignment.id.uuidString]
+        content.title = reminder.title
+        content.body = reminder.spokenText
+        content.userInfo = ["assignmentID": reminder.assignmentID.uuidString]
         content.interruptionLevel = .timeSensitive
         content.threadIdentifier = "choresplit-reminders"
 
-        if assignment.voiceReminderEnabled,
+        if reminder.voiceEnabled,
            let filename = await VoiceReminderService.shared.renderSoundFile(
-               for: spoken,
-               identifier: assignment.id.uuidString,
+               for: reminder.spokenText,
+               identifier: reminder.assignmentID.uuidString,
                rate: VoiceSettings.rate
            ) {
             content.sound = UNNotificationSound(named: UNNotificationSoundName(filename))
@@ -71,23 +94,45 @@ final class NotificationService {
         let components = Calendar.current.dateComponents(
             [.year, .month, .day, .hour, .minute], from: fireDate
         )
-        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: trigger)
+        let request = UNNotificationRequest(
+            identifier: Self.identifier(for: reminder.assignmentID),
+            content: content,
+            trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        )
 
         do {
             try await center.add(request)
-            assignment.notificationID = identifier
             return true
         } catch {
             return false
         }
     }
 
-    func cancelReminder(for assignment: Assignment) async {
-        let identifier = assignment.notificationID ?? "chore-\(assignment.id.uuidString)"
-        center.removePendingNotificationRequests(withIdentifiers: [identifier])
-        VoiceReminderService.shared.deleteSoundFile(named: "reminder-\(assignment.id.uuidString).caf")
-        assignment.notificationID = nil
+    enum ReminderOutcome {
+        case scheduled
+        /// Notifications are switched off for the app; the UI should say so.
+        case permissionDenied
+        /// Nothing to schedule — no date, or the date has already passed.
+        case notScheduled
+    }
+
+    /// Schedule a reminder the user has just set, asking for notification permission first
+    /// if the app has never asked.
+    func scheduleReminderRequestingPermission(_ reminder: ReminderRequest) async -> ReminderOutcome {
+        switch await authorizationStatus() {
+        case .denied:
+            return .permissionDenied
+        case .notDetermined:
+            guard await requestAuthorization() else { return .permissionDenied }
+        default:
+            break
+        }
+        return await scheduleReminder(reminder) ? .scheduled : .notScheduled
+    }
+
+    func cancelReminder(assignmentID: UUID) async {
+        center.removePendingNotificationRequests(withIdentifiers: [Self.identifier(for: assignmentID)])
+        VoiceReminderService.shared.deleteSoundFile(named: "reminder-\(assignmentID.uuidString).caf")
     }
 
     /// Nudge the household when someone's completed chore is waiting on peer ratings.
@@ -131,24 +176,34 @@ final class NotificationService {
 enum ReminderPhrase {
 
     static func sentence(for assignment: Assignment, assigneeName: String) -> String {
+        sentence(
+            assigneeName: assigneeName,
+            choreTitle: assignment.title,
+            points: assignment.pointsQuoted,
+            dueDate: assignment.dueDate
+        )
+    }
+
+    /// The same sentence before an assignment exists — used to preview a reminder while a
+    /// task is still being set up.
+    static func sentence(assigneeName: String, choreTitle: String, points: Int, dueDate: Date) -> String {
         let firstName = assigneeName.split(separator: " ").first.map(String.init) ?? assigneeName
-        let chore = assignment.title.lowercased()
-        let points = assignment.pointsQuoted
+        let chore = choreTitle.lowercased()
         let pointWord = spellOut(points)
         let pointNoun = points == 1 ? "point" : "points"
 
         let timing: String
         let calendar = Calendar.current
-        if calendar.isDateInToday(assignment.dueDate) {
+        if calendar.isDateInToday(dueDate) {
             timing = "is due today"
-        } else if calendar.isDateInTomorrow(assignment.dueDate) {
+        } else if calendar.isDateInTomorrow(dueDate) {
             timing = "is due tomorrow"
-        } else if assignment.dueDate < Date() {
+        } else if dueDate < Date() {
             timing = "is overdue"
         } else {
             let formatter = DateFormatter()
             formatter.dateFormat = "EEEE"
-            timing = "is due on \(formatter.string(from: assignment.dueDate))"
+            timing = "is due on \(formatter.string(from: dueDate))"
         }
 
         return "\(firstName), \(chore) \(timing). That's \(pointWord) \(pointNoun)."

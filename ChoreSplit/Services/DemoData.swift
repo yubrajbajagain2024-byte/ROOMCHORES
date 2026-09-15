@@ -1,5 +1,6 @@
 import Foundation
 import SwiftData
+import UIKit
 
 /// A fully populated household, for trying the app out without spending ten minutes on
 /// setup first. Available from the first setup screen in debug builds.
@@ -105,10 +106,31 @@ enum DemoData {
             )
         }
 
+        // A to-do list for the first roommate, so the home screen has something on it.
+        let myTasks = FairnessEngine.availableChores(in: household).prefix(3)
+        for (offset, chore) in myTasks.enumerated() {
+            let due = Calendar.current.date(
+                bySettingHour: 20, minute: 0, second: 0,
+                of: Calendar.current.date(byAdding: .day, value: offset, to: Date()) ?? Date()
+            ) ?? Date()
+            let assignment = HouseholdActions.assign(
+                chore: chore,
+                to: members[0],
+                due: due,
+                in: household,
+                context: context,
+                reason: "Added by \(members[0].shortName)",
+                scheduleReminder: false
+            )
+            // Leave the last one without a reminder, so both row styles show.
+            if offset == myTasks.count - 1 { assignment.reminderDate = nil }
+        }
+
         // Two chores finished but not yet rated: one by the first roommate, so they can
         // see their own points sitting provisional, and one by someone else, so they have
         // a rating waiting for them.
         let pending: [(Int, Int)] = [(0, 1), (2, 4)]   // (member index, chore index)
+        var awaitingReview: [Assignment] = []
         for (memberIndex, choreIndex) in pending where choreIndex < chores.count {
             let assignment = Assignment(
                 chore: chores[choreIndex],
@@ -119,9 +141,27 @@ enum DemoData {
             assignment.completedAt = Calendar.current.date(byAdding: .hour, value: -2, to: Date())
             assignment.status = .awaitingReview
             context.insert(assignment)
+            awaitingReview.append(assignment)
         }
 
         try? context.save()
+
+        #if DEBUG
+        // Finished tasks come with a proof video, like real ones do. The clips are generated,
+        // so this runs after the household is already usable.
+        let colors: [UIColor] = [.systemTeal, .systemOrange, .systemIndigo]
+        Task { @MainActor in
+            for (index, assignment) in awaitingReview.enumerated() {
+                guard let clip = try? await DemoVideo.make(seconds: 5 + index * 3, color: colors[index % colors.count]),
+                      let prepared = try? await ProofVideoStore.prepare(from: clip)
+                else { continue }
+                try? FileManager.default.removeItem(at: clip)
+                assignment.proofVideoFilename = try? ProofVideoStore.commit(prepared, for: assignment.id)
+                assignment.proofVideoDuration = prepared.duration
+                try? context.save()
+            }
+        }
+        #endif
     }
 
     private static func clamp(_ value: Int) -> Int { min(5, max(1, value)) }

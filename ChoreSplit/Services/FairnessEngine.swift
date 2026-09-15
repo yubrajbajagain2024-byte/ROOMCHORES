@@ -260,14 +260,19 @@ enum FairnessEngine {
         return calendar.date(bySettingHour: 20, minute: 0, second: 0, of: due) ?? due
     }
 
+    /// The most debt or credit that can follow someone into a new cycle — roughly three
+    /// chores' worth on the 1–4 points scale.
+    static let maximumCarryOver: Double = 10
+
     /// Roll the scoreboard into the next cycle, carrying unfinished balance forward so
     /// a lopsided week is not simply forgiven.
     static func rollCycle(for household: Household) {
         let current = standings(for: household)
         for standing in current {
-            // Carry at most half the gap, so debt cannot spiral beyond recovery.
+            // Carry at most half the gap, capped at a few chores' worth, so debt cannot
+            // spiral beyond recovery.
             let carried = (standing.deficit / 2).rounded()
-            standing.roommate.carryOverPoints = max(-30, min(30, carried))
+            standing.roommate.carryOverPoints = max(-maximumCarryOver, min(maximumCarryOver, carried))
         }
         household.cycleStartDate = Calendar.current.startOfDay(for: Date())
     }

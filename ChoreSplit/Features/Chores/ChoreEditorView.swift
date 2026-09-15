@@ -72,38 +72,12 @@ struct ChoreEditorView: View {
                     )
                     .padding(.vertical, 4)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Label("Time", systemImage: "clock")
-                                .font(.subheadline.weight(.semibold))
-                            Spacer()
-                            Text("\(minutes) min")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(Theme.amber)
-                                .monospacedDigit()
-                        }
-                        Slider(
-                            value: Binding(
-                                get: { Double(minutes) },
-                                set: { minutes = Int(($0 / 5).rounded() * 5) }
-                            ),
-                            in: 5...120,
-                            step: 5
-                        )
-                        .tint(Theme.amber)
-                        HStack {
-                            Text("5 min")
-                            Spacer()
-                            Text("2 hours")
-                        }
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    }
+                    MinutesSlider(minutes: $minutes)
                     .padding(.vertical, 4)
                 } header: {
                     Text("What it takes")
                 } footer: {
-                    Text("Three scales, because a chore can be quick but disgusting, or long but easy. Scoring on time alone would under-pay scrubbing the toilet.")
+                    Text("Three scales, because a chore can be quick but disgusting, or long but easy. Each becomes a level from 1 to 4, and the chore is worth their average.")
                 }
 
                 Section {
@@ -157,6 +131,7 @@ struct ChoreEditorView: View {
             existing.proposedDifficulty = difficulty
             existing.proposedLabor = labor
             existing.proposedMinutes = minutes
+            HouseholdActions.choreSaved(existing)
         } else {
             let chore = Chore(
                 title: trimmed,
@@ -170,59 +145,77 @@ struct ChoreEditorView: View {
             )
             chore.household = household
             context.insert(chore)
+            HouseholdActions.choreSaved(chore)
         }
         try? context.save()
         dismiss()
     }
 }
 
-/// The live "this is worth N points" panel, broken down by what drove it.
+/// The live "this is worth N points" panel, showing the three levels behind the number.
 struct PointsPreview: View {
     let values: ChoreValues
     let points: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("\(points)")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
-                    .foregroundStyle(Theme.indigo)
-                    .contentTransition(.numericText())
-                Text("points")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .center, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text("\(points)")
+                        .font(.system(size: 40, weight: .bold, design: .rounded))
+                        .foregroundStyle(Theme.indigo)
+                        .contentTransition(.numericText())
+                    Text(points == 1 ? "point" : "points")
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                PointsScale(points: points)
             }
             .animation(.snappy, value: points)
 
-            let parts = PointsEngine.breakdown(for: values)
-            let total = max(0.001, parts.reduce(0) { $0 + max(0, $1.points) })
-
-            GeometryReader { geo in
-                HStack(spacing: 2) {
-                    ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(barColor(index))
-                            .frame(width: max(2, geo.size.width * (max(0, part.points) / total)))
-                    }
-                }
-            }
-            .frame(height: 8)
-
-            HStack(spacing: 14) {
-                ForEach(Array(parts.enumerated()), id: \.offset) { index, part in
-                    HStack(spacing: 4) {
-                        Circle().fill(barColor(index)).frame(width: 7, height: 7)
+            VStack(spacing: 8) {
+                ForEach(Array(PointsEngine.breakdown(for: values).enumerated()), id: \.offset) { index, part in
+                    HStack(spacing: 10) {
                         Text(part.label)
-                            .font(.caption2)
+                            .font(.caption)
                             .foregroundStyle(.secondary)
+                            .frame(width: 96, alignment: .leading)
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule().fill(Color(.tertiarySystemFill))
+                                Capsule()
+                                    .fill(barColor(index))
+                                    .frame(width: geo.size.width * part.level / Double(PointsEngine.maximumPoints))
+                            }
+                        }
+                        .frame(height: 6)
+                        Text(decimal(part.level))
+                            .font(.caption.weight(.semibold))
+                            .monospacedDigit()
+                            .frame(width: 34, alignment: .trailing)
                     }
                 }
             }
+            .animation(.snappy, value: values)
+
+            Text("Average \(decimal(PointsEngine.exactScore(for: values))), rounded to \(points).")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         }
         .padding(.vertical, 6)
     }
 
     private func barColor(_ index: Int) -> Color {
         [Theme.violet, Theme.teal, Theme.amber][index % 3]
+    }
+
+    /// Levels and averages shown as they really are ("3.25", "2.58") — rounding them to
+    /// half points here would make "average 2.5, rounded to 3" look like a coin toss.
+    private func decimal(_ value: Double) -> String {
+        var text = String(format: "%.2f", value)
+        while text.hasSuffix("0") { text.removeLast() }
+        if text.hasSuffix(".") { text.removeLast() }
+        return text
     }
 }
